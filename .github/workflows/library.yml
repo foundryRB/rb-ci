@@ -1,0 +1,141 @@
+# Reusable release + publish for library monorepos in this org (npm and/or Python
+# packages in one repo). A thin per-repo caller invokes it on push to main.
+#
+# release-please reads the calling repo's release-please-config.json and
+# .release-please-manifest.json, maintains a per-package "release PR" from
+# Conventional Commits, and on merge cuts the tag (<pkg>-vX.Y.Z), the GitHub release,
+# and the per-package CHANGELOG. Any released package that carries a package.json is
+# then published to the public npm registry. Python packages ship to PyPI (csd-library
+# ADR-0004), but their publish job CANNOT live here: PyPI trusted publishing validates
+# the OIDC token's job_workflow_ref claim, which for a reusable workflow points at THIS
+# file in THIS repo, never matching a publisher registered on the calling repo
+# (pypi/warehouse#11096). So the caller carries a publish-pypi job of its own, wired to
+# the paths_released output below, with its steps INLINE - not behind a composite in
+# this repo, because pypa/gh-action-pypi-publish derives its Docker invocation from
+# github.action_repository, which inside a nested composite names the composite's repo
+# and produces an invalid image reference (observed: ghcr.io/<ThisOrg>/ci:main).
+#
+# npm publishes go to registry.npmjs.org, not GitHub Packages: GitHub Packages requires
+# an auth token to READ even a public package, so a consumer repo cannot be forked and
+# built by anyone outside the org. Public npm needs no read credential at all, which is
+# what makes a consumer repo forkable. Publishing carries no stored credential either -
+# each package names the calling repo's release.yml as an OIDC trusted publisher.
+#
+# This is the library counterpart to build.yml (which builds + pushes image / chart /
+# docs artifacts for deployable services). Libraries use release-please rather than
+# semantic-release because one repo here carries several independently-versioned
+# packages across two ecosystems, which semantic-release does not model; see
+# csd-library ADR-0002.
+name: library
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node version used to build and publish npm packages.
+        type: string
+        default: '24'
+      runner:
+        description: >-
+          Runner to execute on. Defaults to the in-cluster ARC scale set
+          (foundry-platform ADR-037 - all CI on ARC runners, never GitHub-hosted). Every
+          job below reads it through `github.event.repository.fork && 'ubuntu-latest' ||
+          inputs.runner`: a FORK has no access to this org's self-hosted scale set, so on
+          a fork every job would wait for a runner forever. ADR-037 governs OUR runs; a
+          fork's runs are not ours. publish-npm is pinned GitHub-hosted regardless (see
+          the job).
+        type: string
+        default: arc-dind
+    outputs:
+      paths_released:
+        description: >-
+          JSON array of package directories release-please cut this run (empty or "[]"
+          when the push only opened or updated a release PR). The caller's inline
+          publish-pypi job fans out over it - see the header for why that job cannot
+          live here.
+        value: ${{ jobs.release.outputs.paths_released }}
+
+permissions:
+  contents: write        # tags + GitHub releases (release-please)
+  pull-requests: write   # the release PR (release-please)
+  id-token: write        # npm provenance (sigstore attestation via GitHub OIDC)
+
+jobs:
+  # The org's two commit invariants (Conventional-Commits subject + no co-author
+  # trailer), enforced where every release flows: release-please derives each package's
+  # version from the commit type, so a malformed subject silently ships nothing. release
+  # needs it, so a bad commit never cuts a release PR.
+  commit-hygiene:
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-latest' || inputs.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: VFPT-VODAFONE-FOUNDRY/adf-ci/.github/actions/check-commit-hygiene@main
+
+  # The org's secrets gate: fail the run when a pushed commit introduces a credential.
+  # release needs it, so a leaked secret never cuts a release PR or publishes a package.
+  secrets-scan:
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-latest' || inputs.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: VFPT-VODAFONE-FOUNDRY/adf-ci/.github/actions/secrets-scan@main
+
+  release:
+    needs: [commit-hygiene, secrets-scan]
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-latest' || inputs.runner }}
+    outputs:
+      paths_released: ${{ steps.release.outputs.paths_released }}
+    steps:
+      - name: release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ github.token }}
+
+  # Fans out over the packages release-please actually cut this run. Empty / "[]"
+  # whenever the push only opened or updated a release PR (no release), so this job
+  # is skipped until a release PR is merged.
+  publish-npm:
+    needs: release
+    if: needs.release.outputs.paths_released != '' && needs.release.outputs.paths_released != '[]'
+    # NOT inputs.runner, and the one deliberate exception to the platform's ADR-037
+    # all-CI-on-ARC rule: npm refuses a provenance attestation minted on a self-hosted
+    # runner ("Only github-hosted runners are supported when publishing with
+    # provenance"), so on arc-dind every publish dies at the registry with a 422.
+    # Publishing a public artifact to a public registry has no business riding on
+    # the install's uptime either - this is the one job whose audience is outside the lab.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ${{ fromJSON(needs.release.outputs.paths_released) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+      # Trusted publishing (OIDC) needs npm >= 11.5.1, and Node 24's bundled npm tracks
+      # whichever Node release setup-node resolves, so raise the floor explicitly.
+      - name: Raise npm to a version that supports trusted publishing
+        run: npm install -g npm@latest
+      # No NODE_AUTH_TOKEN, deliberately: each package names this repo's release.yml as a
+      # trusted publisher, so npm mints a short-lived credential from the run's OIDC token
+      # (id-token: write above). There is no standing secret to steal, leak, or rotate -
+      # which is also where npm is forcing everyone by January 2027, when tokens lose
+      # direct publish. A package with no trusted publisher configured fails here with an
+      # auth error; configure the publisher rather than reintroducing a token.
+      #
+      # --provenance signs the tarball with a sigstore attestation from the same OIDC
+      # token, so npm records the commit and workflow the tarball was built from.
+      - name: Publish ${{ matrix.path }} to npm (Python packages have no package.json and are skipped, the tag is their release)
+        working-directory: ${{ matrix.path }}
+        run: |
+          if [ -f package.json ]; then
+            echo "Publishing ${{ matrix.path }}"
+            npm ci
+            npm publish --provenance
+          else
+            echo "${{ matrix.path }} has no package.json (Python package); the git tag is the release, nothing to publish."
+          fi
