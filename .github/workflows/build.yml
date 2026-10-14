@@ -31,7 +31,7 @@
 # repo with no compose falls back to a single devops/Dockerfile named for the app.
 #
 # GHCR repository names must be lowercase; an owner/repo may carry uppercase
-# (e.g. VFPT-VODAFONE-FOUNDRY), so every ref is lowercased before use.
+# (e.g. foundryRB), so every ref is lowercased before use.
 name: build
 
 on:
@@ -89,7 +89,7 @@ on:
           (INT-FOUNDRY-061) reads it read-only; the fleet runs one platform repo,
           so the default is right for every app.
         type: string
-        default: VFPT-VODAFONE-FOUNDRY/adf-platform
+        default: foundryRB/rb-platform
     secrets:
       PLATFORM_READ_TOKEN:
         required: false
@@ -173,7 +173,7 @@ jobs:
       # public or private (conformance/action.yml says why).
       - if: ${{ inputs.app-contract }}
         name: Per-app conformance suite (REF-Foundry section 4)
-        uses: VFPT-VODAFONE-FOUNDRY/adf-ci/conformance@main
+        uses: foundryRB/rb-ci/conformance@main
         with:
           app-name: ${{ inputs.app-name }}
           # The reconcile check (INT-FOUNDRY-061): the one deliberate
@@ -197,7 +197,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: VFPT-VODAFONE-FOUNDRY/adf-ci/.github/actions/check-commit-hygiene@main
+      - uses: foundryRB/rb-ci/.github/actions/check-commit-hygiene@main
 
   # The org's secrets gate: fail the run when a pushed commit introduces a credential.
   # Like commit-hygiene this applies to EVERY repo, including the docs-only portal, so it
@@ -207,7 +207,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: VFPT-VODAFONE-FOUNDRY/adf-ci/.github/actions/secrets-scan@main
+      - uses: foundryRB/rb-ci/.github/actions/secrets-scan@main
 
   # The org's dependency gate: every npm and Python bundle the repo ships, audited for
   # known advisories, with the ones a repo accepts recorded in its root
@@ -219,7 +219,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: VFPT-VODAFONE-FOUNDRY/adf-ci/.github/actions/dependency-audit@main
+      - uses: foundryRB/rb-ci/.github/actions/dependency-audit@main
 
   # Never releases from a pull request: a PR head is a candidate, not a version. The
   # four gates above are safe to run on one (both commit gates already resolve a

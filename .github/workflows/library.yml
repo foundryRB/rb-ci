@@ -70,7 +70,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: VFPT-VODAFONE-FOUNDRY/adf-ci/.github/actions/check-commit-hygiene@main
+      - uses: foundryRB/rb-ci/.github/actions/check-commit-hygiene@main
 
   # The org's secrets gate: fail the run when a pushed commit introduces a credential.
   # release needs it, so a leaked secret never cuts a release PR or publishes a package.
@@ -79,7 +79,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: VFPT-VODAFONE-FOUNDRY/adf-ci/.github/actions/secrets-scan@main
+      - uses: foundryRB/rb-ci/.github/actions/secrets-scan@main
 
   release:
     needs: [commit-hygiene, secrets-scan]
