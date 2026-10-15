@@ -50,6 +50,15 @@ on:
           context, so it stays on ARC; only the forker's own pushes go GitHub-hosted.
         type: string
         default: arc-dind
+      platforms:
+        description: >-
+          CPU architectures every image is built for, as a buildx --platform list.
+          Both by default: an install on Apple-silicon or other arm64 nodes needs a
+          native arm64 image (an amd64-only image there runs under emulation, and
+          emulated Go/Node processes crash at random), while an amd64 install pulls the
+          amd64 one from the same tag. A repo can narrow it, e.g. linux/amd64.
+        type: string
+        default: linux/amd64,linux/arm64
       app-name:
         description: >-
           The app's fleet name: its entry in the install manifest, and the string
@@ -338,8 +347,17 @@ jobs:
         env:
           VERSION: ${{ steps.release.outputs.new_release_version }}
           DOCS_BASE: ${{ inputs.docs-base }}
+          PLATFORMS: ${{ inputs.platforms }}
         run: |
           set -euo pipefail
+
+          # Multi-arch: register the QEMU emulators for the foreign architecture and
+          # create a buildx builder that can build several platforms at once. Plain
+          # docker commands, not a marketplace action, so an enterprise Actions
+          # allowlist has nothing extra to admit.
+          docker run --privileged --rm tonistiigi/binfmt --install all >/dev/null
+          docker buildx create --name multi --driver docker-container --use >/dev/null
+          docker buildx inspect --bootstrap >/dev/null
 
           # Every registry push reports the one possible fault as its remedy,
           # not as a raw registry error. Images and the chart share the text
@@ -353,8 +371,10 @@ jobs:
             echo "    Fix the grant, then push a release-cutting commit - re-running"
             echo "    this job republishes nothing once the tag exists."
           }
-          push_image() {
-            docker push "$1" && return 0
+          # Build for every platform and push in one step (a multi-platform image
+          # has no single local copy to `docker push` afterwards).
+          build_push() {
+            DOCKER_BUILDKIT=1 docker buildx build --platform "$PLATFORMS" --push "$@" && return 0
             grant_refused
             return 1
           }
@@ -397,8 +417,7 @@ jobs:
             // No build secret: @psa-department-of-engineering/* resolves from the
             // public npm registry (csd-library ADR-0003), so an SPA stage installs
             // it anonymously.
-            lines.push(['DOCKER_BUILDKIT=1 docker build', q(ctx), '-f', q(dockerfile), ...args, '-t', q(tag)].join(' '));
-            lines.push('push_image ' + q(tag));
+            lines.push(['build_push', q(ctx), '-f', q(dockerfile), ...args, '-t', q(tag)].join(' '));
             n++;
           }
           if (n === 0) console.error('compose has no buildable services; no app image built');
@@ -406,12 +425,11 @@ jobs:
           console.error('image builds generated: ' + n);
           NODE
             node /tmp/gen-build.js
-            # Sourced, not exec'd: the generated lines call push_image above.
+            # Sourced, not exec'd: the generated lines call build_push above.
             . /tmp/build-images.sh
           elif [ -f devops/Dockerfile ]; then
-            DOCKER_BUILDKIT=1 docker build -f devops/Dockerfile \
+            build_push -f devops/Dockerfile \
               -t "$REG/$APP:$VERSION" .
-            push_image "$REG/$APP:$VERSION"
           fi
 
           # --- Docs site: base path /apps/<app> by default, "/" for the platform portal.
@@ -422,11 +440,9 @@ jobs:
             # No build secret: docs/Dockerfile's `npm ci` pulls
             # @psa-department-of-engineering/* from the public npm registry
             # (csd-library ADR-0003), which needs no credential.
-            DOCKER_BUILDKIT=1 docker build -f docs/Dockerfile \
-              --build-arg DOCS_BASE="$BASE" -t "$REG/$APP-docs:$VERSION" docs/
-            push_image "$REG/$APP-docs:$VERSION"
-            docker tag "$REG/$APP-docs:$VERSION" "$REG/$APP-docs:latest"
-            push_image "$REG/$APP-docs:latest"
+            build_push -f docs/Dockerfile \
+              --build-arg DOCS_BASE="$BASE" \
+              -t "$REG/$APP-docs:$VERSION" -t "$REG/$APP-docs:latest" docs/
           fi
 
           # --- Helm chart (chart name comes from k8s/Chart.yaml; helm reads the
