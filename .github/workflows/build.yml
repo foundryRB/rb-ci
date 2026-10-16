@@ -49,7 +49,7 @@ on:
           A fork PR opened against the canonical repo runs in the canonical repo's
           context, so it stays on ARC; only the forker's own pushes go GitHub-hosted.
         type: string
-        default: arc-dind
+        default: ubuntu-latest
       platforms:
         description: >-
           CPU architectures every image is built for, as a buildx --platform list.
