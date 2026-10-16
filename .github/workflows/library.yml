@@ -45,7 +45,7 @@ on:
           fork's runs are not ours. publish-npm is pinned GitHub-hosted regardless (see
           the job).
         type: string
-        default: arc-dind
+        default: ubuntu-latest
     outputs:
       paths_released:
         description: >-

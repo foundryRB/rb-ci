@@ -27,7 +27,7 @@ jobs:
     secrets: inherit
 ```
 
-Inputs: `runner` (default `arc-dind`), `image-name` (default repo name), `docs-base` (default `/apps/<image-name>`; the platform portal passes `/`), `app-contract` (default `true`; the docs-only platform portal passes `false`).
+Inputs: `runner` (default `ubuntu-latest`), `image-name` (default repo name), `docs-base` (default `/apps/<image-name>`; the platform portal passes `/`), `app-contract` (default `true`; the docs-only platform portal passes `false`).
 
 ### `library.yml`: library monorepos
 
