@@ -31,7 +31,7 @@ Inputs: `runner` (default `ubuntu-latest`), `image-name` (default repo name), `d
 
 ### `library.yml`: library monorepos
 
-For a repo that publishes one or more reusable packages (npm and/or Python) rather than a deployment. On push to `main`, release-please maintains a per-package release PR from Conventional Commits; merging it tags `<pkg>-vX.Y.Z`, creates the GitHub release + CHANGELOG, and publishes any released npm package to GitHub Packages. Python packages have no publish step: the tag is the release, and consumers `pip install` it. Used by `csd-library` (see its ADR-0002).
+For a repo that publishes one or more reusable packages (npm and/or Python) rather than a deployment. On push to `main`, release-please maintains a per-package release PR from Conventional Commits; merging it tags `<pkg>-vX.Y.Z`, creates the GitHub release + CHANGELOG, and publishes any released npm package to the public npm registry with provenance, through npm trusted publishing (no stored token; each package names the caller's `release.yml` as its trusted publisher). A Python package's PyPI publish lives in the caller (see the workflow header for why). Used by `foundryRB/rb-csd-library` (see its ADR-0002 and ADR-0005).
 
 The calling repo must contain `release-please-config.json` and `.release-please-manifest.json` at its root (the package map and current versions).
 
@@ -47,11 +47,11 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      packages: write
+      id-token: write   # npm provenance + trusted publishing; a called workflow gets only a subset of this
     secrets: inherit
 ```
 
-Inputs: `node-version` (default `22`), `npm-scope` (default `@psa-department-of-engineering`), `runner` (default `ubuntu-latest`).
+Inputs: `node-version` (default `24`), `runner` (default `ubuntu-latest`). Output: `paths_released`, the package directories cut this run.
 
 One-time repo settings the caller needs: **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** (so release-please can open the release PR), and a branch-protection rule on `main` that marks the caller's `tests` checks required (so a release PR cannot merge red).
 
