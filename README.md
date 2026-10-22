@@ -55,6 +55,18 @@ Inputs: `node-version` (default `24`), `runner` (default `ubuntu-latest`). Outpu
 
 One-time repo settings the caller needs: **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** (so release-please can open the release PR), and a branch-protection rule on `main` that marks the caller's `tests` checks required (so a release PR cannot merge red).
 
+## Where CI runs
+
+Every workflow in the org's private repos reads its runner from the `CI_RUNNER` repository variable: `runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}`, and the same expression for the `runner:` input a caller passes to `build.yml`. Unset, everything runs GitHub-hosted. `scripts/ci-runner.sh` sets the variable on every private repo at once, so moving CI is one command, not a commit per repo:
+
+```sh
+scripts/ci-runner.sh status        # what each repo uses now
+scripts/ci-runner.sh self-hosted   # CI_RUNNER=arc-dind: the install's in-cluster ARC runners, free, queue while the cluster is down
+scripts/ci-runner.sh github        # CI_RUNNER=ubuntu-latest: GitHub-hosted, spends the org's Actions minutes
+```
+
+The variable is per repo because private repos on GitHub's Free plan cannot read organisation variables. Public repos are left GitHub-hosted (free for them, and a self-hosted runner would run a fork's pull request on the cluster). The ARC runners are Linux on arm64, so a job that needs macOS or an amd64-only container (`rb-terminal`'s three `package-*` installer jobs) is skipped while CI is self-hosted: cut a desktop release in `github` mode. A new repo joins the switch by using the same expression in its workflows.
+
 ## Conventions
 
 - Both workflows enforce the platform's commit convention before releasing, via the shared `check-commit-hygiene` composite over every commit a push introduced; the convention itself (the admitted types, what each releases, the no-trailer rule) is documented once, on the platform portal's GitOps delivery page under "Commit convention". The `types` list in the composite is its source.
