@@ -61,11 +61,11 @@ Every workflow in the org's private repos reads its runner from the `CI_RUNNER` 
 
 ```sh
 scripts/ci-runner.sh status        # what each repo uses now
-scripts/ci-runner.sh self-hosted   # CI_RUNNER=arc-dind: the install's in-cluster ARC runners, free, queue while the cluster is down
-scripts/ci-runner.sh github        # CI_RUNNER=ubuntu-latest: GitHub-hosted, spends the org's Actions minutes
+scripts/ci-runner.sh self-hosted   # CI_RUNNER=arc-dind, CI_PLATFORMS=linux/arm64: the install's in-cluster ARC runners, free, queue while the cluster is down
+scripts/ci-runner.sh github        # CI_RUNNER=ubuntu-latest, CI_PLATFORMS=linux/amd64,linux/arm64: GitHub-hosted, spends the org's Actions minutes
 ```
 
-The variable is per repo because private repos on GitHub's Free plan cannot read organisation variables. Public repos are left GitHub-hosted (free for them, and a self-hosted runner would run a fork's pull request on the cluster). The ARC runners are Linux on arm64, so a job that needs macOS or an amd64-only container (`rb-terminal`'s three `package-*` installer jobs) is skipped while CI is self-hosted: cut a desktop release in `github` mode. A new repo joins the switch by using the same expression in its workflows.
+The variable is per repo because private repos on GitHub's Free plan cannot read organisation variables. Public repos are left GitHub-hosted (free for them, and a self-hosted runner would run a fork's pull request on the cluster). The ARC runners are Linux on arm64, so a job that needs macOS or an amd64-only container (`rb-terminal`'s three `package-*` installer jobs) is skipped while CI is self-hosted: cut a desktop release in `github` mode. The same switch narrows the image architectures: callers pass `platforms: ${{ vars.CI_PLATFORMS || 'linux/amd64,linux/arm64' }}`, and `self-hosted` sets `linux/arm64`. The ARC runners are arm64, so the amd64 half of a multi-arch build would run under QEMU emulation, where Go and Node tools such as esbuild segfault (rb-notes' `rb-notes-e2e` image failed this way). Images built in `self-hosted` mode are arm64-only; cut a release in `github` mode when an amd64 install needs one. A new repo joins the switch by using the same expressions in its workflows.
 
 ## Conventions
 

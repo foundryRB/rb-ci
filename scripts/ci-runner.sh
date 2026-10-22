@@ -29,8 +29,8 @@ mode="${1:-}"
 org="${2:-foundryRB}"
 
 case "$mode" in
-    github) value=ubuntu-latest ;;
-    self-hosted) value=arc-dind ;;
+    github) value=ubuntu-latest; platforms=linux/amd64,linux/arm64 ;;
+    self-hosted) value=arc-dind; platforms=linux/arm64 ;;
     status) value= ;;
     *)
         echo "usage: $(basename "$0") github|self-hosted|status [org]" >&2
@@ -47,9 +47,11 @@ fi
 for repo in $repos; do
     if [ -z "$value" ]; then
         current=$(gh variable get CI_RUNNER --repo "$org/$repo" 2>/dev/null || echo "(unset: ubuntu-latest)")
-        printf '%-24s %s\n' "$repo" "$current"
+        plat=$(gh variable get CI_PLATFORMS --repo "$org/$repo" 2>/dev/null || echo "(unset: amd64+arm64)")
+        printf '%-24s %-22s %s\n' "$repo" "$current" "$plat"
     else
         gh variable set CI_RUNNER --repo "$org/$repo" --body "$value"
-        printf '%-24s -> %s\n' "$repo" "$value"
+        gh variable set CI_PLATFORMS --repo "$org/$repo" --body "$platforms"
+        printf '%-24s -> %s (%s)\n' "$repo" "$value" "$platforms"
     fi
 done
